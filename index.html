@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>Rafex Overlay</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:transparent;font:13px "Segoe UI",system-ui,sans-serif;color:#e8e6f5;user-select:none}
+canvas{position:fixed;inset:0;width:100%;height:100%}
+#panel{position:fixed;top:40px;right:40px;width:300px;max-height:calc(100% - 80px);overflow-y:auto;background:rgba(24,24,32,.93);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:0 14px 12px}
+#head{margin:0 -14px 10px;padding:11px 14px;cursor:move;display:flex;justify-content:space-between;font-weight:600;border-bottom:1px solid rgba(255,255,255,.08)}
+h2{font-size:12px;margin:14px 0 8px;color:#b4a8eb;font-weight:600}
+.row{display:flex;gap:6px;margin-bottom:6px;align-items:center}
+button,input[type=text]{font:inherit;color:#e8e6f5;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:7px 8px}
+button{cursor:pointer;flex:1}button:hover{background:rgba(255,255,255,.15)}
+button.on{background:rgba(154,122,255,.3);border-color:#9a7aff;color:#d6cbff}
+input[type=text]{flex:1;min-width:0;user-select:text}
+.sl{margin-bottom:8px}.sl div{display:flex;justify-content:space-between;color:#8a88a0;margin-bottom:3px}
+input[type=range]{width:100%;accent-color:#9a7aff}
+#mode{width:100%;padding:10px;font-weight:600}
+#mode.draw{background:rgba(70,200,140,.25);border-color:#46c88c;color:#9affcb}
+.hint{color:#8a88a0;font-size:11px;line-height:1.45}
+#status{color:#8a88a0;margin-top:10px;font-size:11px}
+</style></head><body>
+<canvas id="cv"></canvas>
+<div id="panel">
+ <div id="head"><span>Rafex Overlay</span><span id="min" style="cursor:pointer">—</span></div>
+ <div id="body">
+  <button id="mode">Режим: РЕДАКТИРУЮ (F8)</button>
+  <div class="hint" style="margin-top:6px">«Рисую» — клики проходят сквозь трафарет в программу под ним. «Редактирую» — двигаешь и стираешь трафарет.</div>
+  <h2>Создание</h2>
+  <div class="row"><input type="text" id="url" placeholder="Ссылка на изображение"><button id="flip" style="flex:0 0 38px">⇋</button></div>
+  <div class="row"><button id="load" class="on">Загрузить</button><button id="file">Файл…</button><button id="clear">Удалить</button></div>
+  <h2>Размер и вид</h2>
+  <div class="sl"><div><span>Размер</span><b id="v1">500</b></div><input type="range" id="size" min="50" max="2000" value="500"></div>
+  <div class="sl"><div><span>Прозрачность</span><b id="v2">0.5</b></div><input type="range" id="tr" min="0.1" max="0.95" step="0.05" value="0.5"></div>
+  <div class="sl"><div><span>Поворот</span><b id="v3">0°</b></div><input type="range" id="rot" min="0" max="360" value="0"></div>
+  <h2>Инструменты</h2>
+  <div class="row"><button id="erase">Ластик</button><button id="reset">Очистить</button><button id="grid">Сетка</button></div>
+  <div class="row"><button id="zone" style="flex:2">Пошагово</button><button id="zp" style="flex:0 0 32px">◀</button><span id="zl" style="flex:0 0 44px;text-align:center">1 / 4</span><button id="zn" style="flex:0 0 32px">▶</button></div>
+  <div class="row"><button id="center">В центр</button><button id="rr">Сброс ↺</button><button id="quit">Выход</button></div>
+  <div class="hint">F8 — режим, F9 — спрятать/показать, F10 — выход.<br>Стрелки — точная подстройка (Shift — крупнее).</div>
+  <div id="status">Готов к работе</div>
+ </div>
+</div>
+<script>
+const N=14,ZONES=4,$=id=>document.getElementById(id);
+const cv=$('cv'),ctx=cv.getContext('2d'),panel=$('panel');
+const st={img:null,size:500,tr:.5,rot:0,flip:false,erase:false,grid:false,zone:false,zc:1,edit:true,x:innerWidth/2,y:innerHeight/2,erased:new Set(),hover:null,drag:null,erasing:false};
+let ignoring=null;
+function setIgnore(v){if(ignoring!==v){ignoring=v;api.setIgnore(v)}}
+function status(t){$('status').textContent=t}
+function resize(){const d=devicePixelRatio||1;cv.width=innerWidth*d;cv.height=innerHeight*d;ctx.setTransform(d,0,0,d,0,0);draw()}
+const zoneOf=r=>Math.min(ZONES,Math.floor(r/Math.ceil(N/ZONES))+1);
+function draw(){
+ ctx.clearRect(0,0,innerWidth,innerHeight);
+ if(!st.img)return;
+ const S=st.size,t=S/N,iw=st.img.naturalWidth,ih=st.img.naturalHeight;
+ ctx.save();ctx.translate(st.x,st.y);ctx.rotate(st.rot*Math.PI/180);ctx.translate(-S/2,-S/2);
+ for(let r=0;r<N;r++)for(let c=0;c<N;c++){
+  if(st.erased.has(r*N+c))continue;
+  const sc=st.flip?N-1-c:c;
+  let a=1-st.tr;if(st.zone&&zoneOf(r)!==st.zc)a=Math.max(0,a-.45);
+  ctx.globalAlpha=a;
+  ctx.drawImage(st.img,sc*iw/N,r*ih/N,iw/N,ih/N,c*t,r*t,t+.5,t+.5);
+ }
+ ctx.globalAlpha=1;
+ if(st.grid){ctx.strokeStyle='rgba(255,255,255,.4)';ctx.lineWidth=1;ctx.beginPath();for(let i=0;i<=N;i++){ctx.moveTo(i*t,0);ctx.lineTo(i*t,S);ctx.moveTo(0,i*t);ctx.lineTo(S,i*t)}ctx.stroke()}
+ if(st.edit){ctx.strokeStyle='rgba(154,122,255,.7)';ctx.setLineDash([6,6]);ctx.strokeRect(0,0,S,S);ctx.setLineDash([])}
+ if(st.edit&&st.hover){ctx.strokeStyle='#9a7aff';ctx.lineWidth=2;ctx.strokeRect(st.hover.c*t,st.hover.r*t,t,t)}
+ ctx.restore();
+}
+function toCell(px,py){
+ const a=-st.rot*Math.PI/180,dx=px-st.x,dy=py-st.y;
+ const lx=dx*Math.cos(a)-dy*Math.sin(a)+st.size/2,ly=dx*Math.sin(a)+dy*Math.cos(a)+st.size/2;
+ if(lx<0||ly<0||lx>=st.size||ly>=st.size)return null;
+ return{r:Math.floor(ly/st.size*N),c:Math.floor(lx/st.size*N)};
+}
+// --- сквозные клики ---
+addEventListener('mousemove',e=>{
+ const overUI=!!e.target.closest('#panel');
+ setIgnore(!(overUI||st.edit));
+ if(!overUI&&st.edit&&st.img){
+  st.hover=toCell(e.clientX,e.clientY);
+  if(st.erasing&&st.hover)st.erased.add(st.hover.r*N+st.hover.c);
+  if(st.drag){st.x=e.clientX+st.drag.dx;st.y=e.clientY+st.drag.dy}
+  draw();
+ }
+});
+cv.addEventListener('mousedown',e=>{
+ if(!st.edit||!st.img)return;
+ if(st.erase){st.erasing=true;const c=toCell(e.clientX,e.clientY);if(c)st.erased.add(c.r*N+c.c);draw()}
+ else st.drag={dx:st.x-e.clientX,dy:st.y-e.clientY};
+});
+addEventListener('mouseup',()=>{st.drag=null;st.erasing=false});
+addEventListener('keydown',e=>{
+ if(e.target.tagName==='INPUT'&&e.target.type==='text')return;
+ if(!st.img||!st.edit||st.erase)return;
+ const s=e.shiftKey?8:2,m={ArrowLeft:[-s,0],ArrowRight:[s,0],ArrowUp:[0,-s],ArrowDown:[0,s]}[e.key];
+ if(m){e.preventDefault();st.x+=m[0];st.y+=m[1];draw()}
+});
+// --- режимы ---
+function setEdit(v){
+ st.edit=v;st.drag=null;st.erasing=false;
+ const b=$('mode');b.classList.toggle('draw',!v);
+ b.textContent=v?'Режим: РЕДАКТИРУЮ (F8)':'Режим: РИСУЮ (F8) — клики проходят сквозь';
+ setIgnore(!v?true:false);draw();
+ status(v?'Редактирование: двигай и стирай':'Рисуй — трафарет не мешает кликам');
+}
+$('mode').onclick=()=>setEdit(!st.edit);
+api.onToggleEdit(()=>setEdit(!st.edit));
+// --- загрузка ---
+function setImg(src){const im=new Image();im.onload=()=>{st.img=im;st.erased.clear();draw();status('Трафарет создан')};im.onerror=()=>status('Не удалось открыть изображение');im.src=src}
+$('load').onclick=async()=>{
+ const u=$('url').value.trim();if(!u)return status('Укажи ссылку на картинку');
+ status('Загрузка текстуры...');
+ const r=await api.fetchImage(u);
+ if(r.dataUrl){try{localStorage.setItem('rafex_url',u)}catch(e){}setImg(r.dataUrl)}
+ else status(r.error==='NOT_IMAGE'?'Сайт не отдал картинку (хотлинк-блок). Скачай и открой через «Файл…»':r.error==='TIMEOUT'?'Сайт не отвечает больше 15 сек':'Ошибка загрузки: '+r.error);
+};
+$('file').onclick=async()=>{const d=await api.openFile();if(d)setImg(d)};
+$('clear').onclick=()=>{st.img=null;st.erased.clear();draw();status('Трафарет удалён')};
+function tog(id,key){$(id).onclick=()=>{st[key]=!st[key];$(id).classList.toggle('on',st[key]);draw();return st[key]}}
+tog('flip','flip');tog('grid','grid');
+$('erase').onclick=()=>{st.erase=!st.erase;$('erase').classList.toggle('on',st.erase);$('erase').textContent=st.erase?'Ластик: вкл':'Ластик';if(st.erase&&!st.edit)setEdit(true)};
+$('reset').onclick=()=>{st.erased.clear();draw()};
+$('zone').onclick=()=>{st.zone=!st.zone;$('zone').classList.toggle('on',st.zone);$('zone').textContent=st.zone?'Пошагово: вкл':'Пошагово';draw()};
+function shift(d){if(!st.zone)return;st.zc=Math.max(1,Math.min(ZONES,st.zc+d));$('zl').textContent=st.zc+' / '+ZONES;draw()}
+$('zp').onclick=()=>shift(-1);$('zn').onclick=()=>shift(1);
+$('size').oninput=e=>{st.size=+e.target.value;$('v1').textContent=st.size;draw()};
+$('tr').oninput=e=>{st.tr=+e.target.value;$('v2').textContent=st.tr;draw()};
+$('rot').oninput=e=>{st.rot=+e.target.value;$('v3').textContent=st.rot+'°';draw()};
+$('rr').onclick=()=>{st.rot=0;$('rot').value=0;$('v3').textContent='0°';draw()};
+$('center').onclick=()=>{st.x=innerWidth/2;st.y=innerHeight/2;draw()};
+$('quit').onclick=()=>api.quit();
+$('min').onclick=()=>{const b=$('body');b.hidden=!b.hidden;$('min').textContent=b.hidden?'+':'—'};
+// --- перетаскивание панели ---
+{let d=null;$('head').addEventListener('mousedown',e=>{const r=panel.getBoundingClientRect();d={dx:e.clientX-r.left,dy:e.clientY-r.top}});
+addEventListener('mousemove',e=>{if(!d)return;panel.style.left=(e.clientX-d.dx)+'px';panel.style.top=(e.clientY-d.dy)+'px';panel.style.right='auto'});
+addEventListener('mouseup',()=>d=null)}
+try{const u=localStorage.getItem('rafex_url');if(u)$('url').value=u}catch(e){}
+addEventListener('resize',resize);resize();setEdit(true);
+</script></body></html>
